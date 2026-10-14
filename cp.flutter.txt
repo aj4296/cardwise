@@ -1,0 +1,1290 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'dart:async';
+
+// ============================================================
+// FIREBASE CONFIGURATION
+// ============================================================
+
+class DefaultFirebaseOptions {
+  static FirebaseOptions get currentPlatform {
+    return android;
+  }
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'YOUR_API_KEY_HERE',
+    appId: 'YOUR_APP_ID_HERE',
+    messagingSenderId: 'YOUR_SENDER_ID_HERE',
+    projectId: 'YOUR_PROJECT_ID_HERE',
+    storageBucket: 'YOUR_STORAGE_BUCKET_HERE',
+  );
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+class AppUser {
+  final String uid;
+  final String name;
+  final String email;
+  final String role;
+  final DateTime createdAt;
+
+  AppUser({
+    required this.uid,
+    required this.name,
+    required this.email,
+    this.role = 'user',
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'uid': uid,
+    'name': name,
+    'email': email,
+    'role': role,
+    'createdAt': createdAt,
+  };
+
+  factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
+    uid: json['uid'] ?? '',
+    name: json['name'] ?? '',
+    email: json['email'] ?? '',
+    role: json['role'] ?? 'user',
+    createdAt: (json['createdAt'] as Timestamp).toDate(),
+  );
+}
+
+class Bank {
+  final String id;
+  final String name;
+  final bool status;
+
+  Bank({required this.id, required this.name, this.status = true});
+
+  Map<String, dynamic> toJson() => {'name': name, 'status': status};
+
+  factory Bank.fromJson(Map<String, dynamic> json, String id) => Bank(
+    id: id,
+    name: json['name'] ?? '',
+    status: json['status'] ?? true,
+  );
+}
+
+class CreditCard {
+  final String id;
+  final String bankId;
+  String bankName;
+  final String name;
+  final String variant;
+  final bool status;
+
+  CreditCard({
+    required this.id,
+    required this.bankId,
+    this.bankName = '',
+    required this.name,
+    required this.variant,
+    this.status = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'bankId': bankId,
+    'name': name,
+    'variant': variant,
+    'status': status,
+  };
+
+  factory CreditCard.fromJson(Map<String, dynamic> json, String id) => CreditCard(
+    id: id,
+    bankId: json['bankId'] ?? '',
+    name: json['name'] ?? '',
+    variant: json['variant'] ?? '',
+    status: json['status'] ?? true,
+  );
+}
+
+class Merchant {
+  final String id;
+  final String name;
+  final String category;
+  final bool status;
+
+  Merchant({
+    required this.id,
+    required this.name,
+    required this.category,
+    this.status = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'category': category,
+    'status': status,
+  };
+
+  factory Merchant.fromJson(Map<String, dynamic> json, String id) => Merchant(
+    id: id,
+    name: json['name'] ?? '',
+    category: json['category'] ?? '',
+    status: json['status'] ?? true,
+  );
+}
+
+class Offer {
+  final String id;
+  final String cardId;
+  final String merchantId;
+  final String offerType;
+  final double discountPercentage;
+  final double cashbackPercentage;
+  final double fixedDiscount;
+  final double minimumTransaction;
+  final double maximumBenefit;
+  final String description;
+  final DateTime startDate;
+  final DateTime endDate;
+  final bool active;
+
+  Offer({
+    required this.id,
+    required this.cardId,
+    required this.merchantId,
+    this.offerType = 'discount',
+    this.discountPercentage = 0,
+    this.cashbackPercentage = 0,
+    this.fixedDiscount = 0,
+    this.minimumTransaction = 0,
+    this.maximumBenefit = 0,
+    this.description = '',
+    required this.startDate,
+    required this.endDate,
+    this.active = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'cardId': cardId,
+    'merchantId': merchantId,
+    'offerType': offerType,
+    'discountPercentage': discountPercentage,
+    'cashbackPercentage': cashbackPercentage,
+    'fixedDiscount': fixedDiscount,
+    'minimumTransaction': minimumTransaction,
+    'maximumBenefit': maximumBenefit,
+    'description': description,
+    'startDate': startDate,
+    'endDate': endDate,
+    'active': active,
+  };
+
+  factory Offer.fromJson(Map<String, dynamic> json, String id) => Offer(
+    id: id,
+    cardId: json['cardId'] ?? '',
+    merchantId: json['merchantId'] ?? '',
+    offerType: json['offerType'] ?? 'discount',
+    discountPercentage: (json['discountPercentage'] ?? 0).toDouble(),
+    cashbackPercentage: (json['cashbackPercentage'] ?? 0).toDouble(),
+    fixedDiscount: (json['fixedDiscount'] ?? 0).toDouble(),
+    minimumTransaction: (json['minimumTransaction'] ?? 0).toDouble(),
+    maximumBenefit: (json['maximumBenefit'] ?? 0).toDouble(),
+    description: json['description'] ?? '',
+    startDate: (json['startDate'] as Timestamp).toDate(),
+    endDate: (json['endDate'] as Timestamp).toDate(),
+    active: json['active'] ?? true,
+  );
+
+  bool isActive() {
+    final now = DateTime.now();
+    return active && now.isAfter(startDate) && now.isBefore(endDate);
+  }
+}
+
+class RecommendationResult {
+  final String cardId;
+  final String cardName;
+  final double saving;
+  final String benefit;
+  final double percentage;
+  final double maximumBenefit;
+  final double minimumTransaction;
+  final String offerDescription;
+
+  RecommendationResult({
+    required this.cardId,
+    required this.cardName,
+    required this.saving,
+    required this.benefit,
+    required this.percentage,
+    required this.maximumBenefit,
+    required this.minimumTransaction,
+    required this.offerDescription,
+  });
+}
+
+// ============================================================
+// SERVICES
+// ============================================================
+
+class RecommendationService {
+  static List<RecommendationResult> calculateRecommendations({
+    required List<CreditCard> userCards,
+    required String merchantId,
+    required double transactionAmount,
+    required List<Offer> allOffers,
+  }) {
+    List<RecommendationResult> results = [];
+    
+    for (var card in userCards) {
+      List<Offer> applicableOffers = allOffers.where((offer) =>
+        offer.cardId == card.id &&
+        offer.merchantId == merchantId &&
+        offer.isActive() &&
+        transactionAmount >= offer.minimumTransaction
+      ).toList();
+      
+      if (applicableOffers.isEmpty) {
+        results.add(RecommendationResult(
+          cardId: card.id,
+          cardName: '${card.bankName} ${card.name}',
+          saving: 0,
+          benefit: 'No applicable offer',
+          percentage: 0,
+          maximumBenefit: 0,
+          minimumTransaction: 0,
+          offerDescription: 'No offer available for this transaction',
+        ));
+        continue;
+      }
+      
+      Offer bestOffer = applicableOffers.reduce((a, b) {
+        double savingA = calculateSaving(transactionAmount: transactionAmount, offer: a);
+        double savingB = calculateSaving(transactionAmount: transactionAmount, offer: b);
+        return savingA > savingB ? a : b;
+      });
+      
+      double saving = calculateSaving(transactionAmount: transactionAmount, offer: bestOffer);
+      
+      String benefit = '';
+      double percentage = 0;
+      
+      if (bestOffer.offerType == 'discount') {
+        benefit = '${bestOffer.discountPercentage.toInt()}% Discount';
+        percentage = bestOffer.discountPercentage;
+      } else if (bestOffer.offerType == 'cashback') {
+        benefit = '${bestOffer.cashbackPercentage.toInt()}% Cashback';
+        percentage = bestOffer.cashbackPercentage;
+      } else if (bestOffer.offerType == 'fixed') {
+        benefit = '₹${bestOffer.fixedDiscount.toInt()} Fixed Discount';
+        percentage = bestOffer.fixedDiscount / transactionAmount * 100;
+      }
+      
+      results.add(RecommendationResult(
+        cardId: card.id,
+        cardName: '${card.bankName} ${card.name}',
+        saving: saving,
+        benefit: benefit,
+        percentage: percentage,
+        maximumBenefit: bestOffer.maximumBenefit,
+        minimumTransaction: bestOffer.minimumTransaction,
+        offerDescription: bestOffer.description,
+      ));
+    }
+    
+    results.sort((a, b) => b.saving.compareTo(a.saving));
+    return results;
+  }
+  
+  static double calculateSaving({
+    required double transactionAmount,
+    required Offer offer,
+  }) {
+    double saving = 0;
+    
+    switch (offer.offerType) {
+      case 'discount':
+        saving = transactionAmount * (offer.discountPercentage / 100);
+        if (offer.maximumBenefit > 0 && saving > offer.maximumBenefit) {
+          saving = offer.maximumBenefit;
+        }
+        break;
+      case 'cashback':
+        saving = transactionAmount * (offer.cashbackPercentage / 100);
+        if (offer.maximumBenefit > 0 && saving > offer.maximumBenefit) {
+          saving = offer.maximumBenefit;
+        }
+        break;
+      case 'fixed':
+        saving = offer.fixedDiscount;
+        break;
+      default:
+        saving = 0;
+    }
+    
+    if (saving > transactionAmount) saving = transactionAmount;
+    return saving;
+  }
+  
+  static RecommendationResult? getBestCard(List<RecommendationResult> recommendations) {
+    if (recommendations.isEmpty) return null;
+    return recommendations.reduce((a, b) => a.saving > b.saving ? a : b);
+  }
+}
+
+// ============================================================
+// PROVIDERS (State Management)
+// ============================================================
+
+class AuthProvider extends ChangeNotifier {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  AppUser? _currentUser;
+  User? _firebaseUser;
+  
+  AppUser? get currentUser => _currentUser;
+  User? get firebaseUser => _firebaseUser;
+  bool get isAuthenticated => _firebaseUser != null;
+  bool get isAdmin => _currentUser?.role == 'admin';
+
+  AuthProvider() {
+    _auth.authStateChanges().listen((User? user) async {
+      _firebaseUser = user;
+      if (user != null) {
+        await _loadUserData(user.uid);
+      } else {
+        _currentUser = null;
+      }
+      notifyListeners();
+    });
+  }
+
+  Future<void> _loadUserData(String uid) async {
+    try {
+      DocumentSnapshot doc = await _firestore.collection('users').doc(uid).get();
+      if (doc.exists) {
+        _currentUser = AppUser.fromJson(doc.data() as Map<String, dynamic>);
+      }
+    } catch (e) {
+      print('Error loading user data: $e');
+    }
+  }
+
+  Future<String?> registerWithEmailPassword({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      UserCredential result = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      
+      User? user = result.user;
+      
+      if (user != null) {
+        AppUser appUser = AppUser(
+          uid: user.uid,
+          name: name,
+          email: email,
+          role: 'user',
+          createdAt: DateTime.now(),
+        );
+        
+        await _firestore.collection('users').doc(user.uid).set(appUser.toJson());
+        _currentUser = appUser;
+        return null;
+      }
+      return 'Registration failed';
+    } on FirebaseAuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'An error occurred. Please try again.';
+    }
+  }
+
+  Future<String?> loginWithEmailPassword({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      UserCredential result = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      
+      User? user = result.user;
+      
+      if (user != null) {
+        await _loadUserData(user.uid);
+        return null;
+      }
+      return 'Login failed';
+    } on FirebaseAuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'An error occurred. Please try again.';
+    }
+  }
+
+  Future<String?> resetPassword(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'An error occurred. Please try again.';
+    }
+  }
+
+  Future<void> logout() async {
+    await _auth.signOut();
+    _currentUser = null;
+    _firebaseUser = null;
+    notifyListeners();
+  }
+
+  Future<void> updateProfile(String name) async {
+    if (_firebaseUser != null) {
+      try {
+        await _firestore.collection('users').doc(_firebaseUser!.uid).update({
+          'name': name,
+        });
+        _currentUser = AppUser(
+          uid: _firebaseUser!.uid,
+          name: name,
+          email: _firebaseUser!.email ?? '',
+          role: _currentUser?.role ?? 'user',
+          createdAt: _currentUser?.createdAt ?? DateTime.now(),
+        );
+        notifyListeners();
+      } catch (e) {
+        print('Error updating profile: $e');
+      }
+    }
+  }
+}
+
+class CardProvider extends ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<CreditCard> _userCards = [];
+  List<Bank> _banks = [];
+  List<CreditCard> _allCards = [];
+  bool _isLoading = false;
+
+  List<CreditCard> get userCards => _userCards;
+  List<Bank> get banks => _banks;
+  List<CreditCard> get allCards => _allCards;
+  bool get isLoading => _isLoading;
+
+  Future<void> loadBanks() async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('banks')
+          .where('status', isEqualTo: true)
+          .get();
+      
+      _banks = snapshot.docs.map((doc) => 
+        Bank.fromJson(doc.data() as Map<String, dynamic>, doc.id)
+      ).toList();
+    } catch (e) {
+      print('Error loading banks: $e');
+    }
+    
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> loadAllCards() async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('cards')
+          .where('status', isEqualTo: true)
+          .get();
+      
+      _allCards = snapshot.docs.map((doc) => 
+        CreditCard.fromJson(doc.data() as Map<String, dynamic>, doc.id)
+      ).toList();
+      
+      await _loadBankNames();
+    } catch (e) {
+      print('Error loading cards: $e');
+    }
+    
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> _loadBankNames() async {
+    for (var card in _allCards) {
+      try {
+        DocumentSnapshot doc = await _firestore.collection('banks').doc(card.bankId).get();
+        if (doc.exists) {
+          card.bankName = doc.data()?['name'] ?? '';
+        }
+      } catch (e) {
+        print('Error loading bank name for card ${card.id}: $e');
+      }
+    }
+  }
+
+  Future<void> loadUserCards(String userId) async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('user_cards')
+          .where('userId', isEqualTo: userId)
+          .get();
+      
+      _userCards = [];
+      
+      for (var doc in snapshot.docs) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        String cardId = data['cardId'] ?? '';
+        
+        DocumentSnapshot cardDoc = await _firestore
+            .collection('cards')
+            .doc(cardId)
+            .get();
+        
+        if (cardDoc.exists) {
+          CreditCard card = CreditCard.fromJson(
+            cardDoc.data() as Map<String, dynamic>,
+            cardId
+          );
+          
+          DocumentSnapshot bankDoc = await _firestore
+              .collection('banks')
+              .doc(card.bankId)
+              .get();
+          
+          if (bankDoc.exists) {
+            card.bankName = bankDoc.data()?['name'] ?? '';
+          }
+          
+          _userCards.add(card);
+        }
+      }
+    } catch (e) {
+      print('Error loading user cards: $e');
+    }
+    
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<String?> addUserCard(String userId, String cardId) async {
+    try {
+      await _firestore.collection('user_cards').add({
+        'userId': userId,
+        'cardId': cardId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      await loadUserCards(userId);
+      return null;
+    } catch (e) {
+      return 'Error adding card: $e';
+    }
+  }
+
+  Future<String?> removeUserCard(String userId, String cardId) async {
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('user_cards')
+          .where('userId', isEqualTo: userId)
+          .where('cardId', isEqualTo: cardId)
+          .get();
+      
+      for (var doc in snapshot.docs) {
+        await doc.reference.delete();
+      }
+      
+      await loadUserCards(userId);
+      return null;
+    } catch (e) {
+      return 'Error removing card: $e';
+    }
+  }
+
+  Future<String?> addCard(CreditCard card) async {
+    try {
+      await _firestore.collection('cards').add(card.toJson());
+      await loadAllCards();
+      return null;
+    } catch (e) {
+      return 'Error adding card: $e';
+    }
+  }
+
+  Future<String?> updateCard(CreditCard card) async {
+    try {
+      await _firestore.collection('cards').doc(card.id).update(card.toJson());
+      await loadAllCards();
+      return null;
+    } catch (e) {
+      return 'Error updating card: $e';
+    }
+  }
+
+  Future<String?> deleteCard(String cardId) async {
+    try {
+      await _firestore.collection('cards').doc(cardId).delete();
+      await loadAllCards();
+      return null;
+    } catch (e) {
+      return 'Error deleting card: $e';
+    }
+  }
+
+  Future<String?> addBank(Bank bank) async {
+    try {
+      await _firestore.collection('banks').add(bank.toJson());
+      await loadBanks();
+      return null;
+    } catch (e) {
+      return 'Error adding bank: $e';
+    }
+  }
+}
+
+class MerchantProvider extends ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Merchant> _merchants = [];
+  bool _isLoading = false;
+
+  List<Merchant> get merchants => _merchants;
+  bool get isLoading => _isLoading;
+
+  Future<void> loadMerchants() async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('merchants')
+          .where('status', isEqualTo: true)
+          .get();
+      
+      _merchants = snapshot.docs.map((doc) => 
+        Merchant.fromJson(doc.data() as Map<String, dynamic>, doc.id)
+      ).toList();
+    } catch (e) {
+      print('Error loading merchants: $e');
+    }
+    
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<String?> addMerchant(Merchant merchant) async {
+    try {
+      await _firestore.collection('merchants').add(merchant.toJson());
+      await loadMerchants();
+      return null;
+    } catch (e) {
+      return 'Error adding merchant: $e';
+    }
+  }
+
+  Future<String?> updateMerchant(Merchant merchant) async {
+    try {
+      await _firestore.collection('merchants').doc(merchant.id).update(merchant.toJson());
+      await loadMerchants();
+      return null;
+    } catch (e) {
+      return 'Error updating merchant: $e';
+    }
+  }
+
+  Future<String?> deleteMerchant(String merchantId) async {
+    try {
+      await _firestore.collection('merchants').doc(merchantId).delete();
+      await loadMerchants();
+      return null;
+    } catch (e) {
+      return 'Error deleting merchant: $e';
+    }
+  }
+}
+
+class OfferProvider extends ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Offer> _offers = [];
+  bool _isLoading = false;
+
+  List<Offer> get offers => _offers;
+  bool get isLoading => _isLoading;
+
+  Future<void> loadOffers() async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      QuerySnapshot snapshot = await _firestore.collection('offers').get();
+      
+      _offers = snapshot.docs.map((doc) => 
+        Offer.fromJson(doc.data() as Map<String, dynamic>, doc.id)
+      ).toList();
+    } catch (e) {
+      print('Error loading offers: $e');
+    }
+    
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<List<Offer>> getActiveOffersForCardAndMerchant(
+    String cardId, 
+    String merchantId
+  ) async {
+    try {
+      QuerySnapshot snapshot = await _firestore
+          .collection('offers')
+          .where('cardId', isEqualTo: cardId)
+          .where('merchantId', isEqualTo: merchantId)
+          .where('active', isEqualTo: true)
+          .get();
+      
+      List<Offer> offers = snapshot.docs.map((doc) => 
+        Offer.fromJson(doc.data() as Map<String, dynamic>, doc.id)
+      ).toList();
+      
+      final now = DateTime.now();
+      return offers.where((offer) => 
+        offer.isActive() && 
+        now.isAfter(offer.startDate) && 
+        now.isBefore(offer.endDate)
+      ).toList();
+    } catch (e) {
+      print('Error loading offers: $e');
+      return [];
+    }
+  }
+
+  Future<String?> addOffer(Offer offer) async {
+    try {
+      await _firestore.collection('offers').add(offer.toJson());
+      await loadOffers();
+      return null;
+    } catch (e) {
+      return 'Error adding offer: $e';
+    }
+  }
+
+  Future<String?> updateOffer(Offer offer) async {
+    try {
+      await _firestore.collection('offers').doc(offer.id).update(offer.toJson());
+      await loadOffers();
+      return null;
+    } catch (e) {
+      return 'Error updating offer: $e';
+    }
+  }
+
+  Future<String?> deleteOffer(String offerId) async {
+    try {
+      await _firestore.collection('offers').doc(offerId).delete();
+      await loadOffers();
+      return null;
+    } catch (e) {
+      return 'Error deleting offer: $e';
+    }
+  }
+}
+
+// ============================================================
+// MAIN APP
+// ============================================================
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  runApp(const CardWiseApp());
+}
+
+class CardWiseApp extends StatelessWidget {
+  const CardWiseApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => CardProvider()),
+        ChangeNotifierProvider(create: (_) => MerchantProvider()),
+        ChangeNotifierProvider(create: (_) => OfferProvider()),
+      ],
+      child: MaterialApp(
+        title: 'CardWise',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          useMaterial3: true,
+        ),
+        home: const SplashScreen(),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// SPLASH SCREEN
+// ============================================================
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final cardProvider = Provider.of<CardProvider>(context, listen: false);
+    final merchantProvider = Provider.of<MerchantProvider>(context, listen: false);
+    final offerProvider = Provider.of<OfferProvider>(context, listen: false);
+
+    await Future.wait([
+      cardProvider.loadBanks(),
+      cardProvider.loadAllCards(),
+      merchantProvider.loadMerchants(),
+      offerProvider.loadOffers(),
+    ]);
+
+    await Future.delayed(const Duration(seconds: 2));
+    
+    if (mounted) {
+      if (authProvider.isAuthenticated) {
+        if (authProvider.isAdmin) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminDashboard()),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const UserDashboard()),
+          );
+        }
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.blue[700]!, Colors.blue[900]!],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.credit_card,
+                size: 80,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'CardWise',
+                style: TextStyle(
+                  fontSize: 40,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  'You tell us which cards you have. We tell you which card saves you the most.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[300],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// LOGIN SCREEN
+// ============================================================
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.blue[700]!, Colors.blue[900]!],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 40),
+                  const Text(
+                    'Welcome Back!',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sign in to continue',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[300],
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  Card(
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _emailController,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.email),
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter your email';
+                              }
+                              if (!value.contains('@')) {
+                                return 'Please enter a valid email';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: const Icon(Icons.lock),
+                              border: const OutlineInputBorder(),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility
+                                      : Icons.visibility_off,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter your password';
+                              }
+                              if (value.length < 6) {
+                                return 'Password must be at least 6 characters';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: _isLoading ? null : _login,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue[700],
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: _isLoading
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white,
+                                    )
+                                  : const Text(
+                                      'Login',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: _forgotPassword,
+                        child: const Text(
+                          'Forgot Password?',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const RegistrationScreen(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          'Create Account',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final error = await authProvider.loginWithEmailPassword(
+      email: _emailController.text.trim(),
+      password: _passwordController.text,
+    );
+    
+    setState(() => _isLoading = false);
+    
+    if (error == null) {
+      if (authProvider.isAdmin) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AdminDashboard()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const UserDashboard()),
+        );
+      }
+    } else {
+      Fluttertoast.showToast(
+        msg: error,
+        backgroundColor: Colors.red,
+        textColor: Colors.white,
+      );
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    if (_emailController.text.isEmpty) {
+      Fluttertoast.showToast(
+        msg: 'Please enter your email first',
+        backgroundColor: Colors.orange,
+        textColor: Colors.white,
+      );
+      return;
+    }
+    
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final error = await authProvider.resetPassword(_emailController.text.trim());
+    
+    if (error == null) {
+      Fluttertoast.showToast(
+        msg: 'Password reset email sent!',
+        backgroundColor: Colors.green,
+        textColor: Colors.white,
+      );
+    } else {
+      Fluttertoast.showToast(
+        msg: error,
+        backgroundColor: Colors.red,
+        textColor: Colors.white,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+}
+
+// ============================================================
+// REGISTRATION SCREEN
+// ============================================================
+
+class RegistrationScreen extends StatefulWidget {
+  const RegistrationScreen({super.key});
+
+  @override
+  State<RegistrationScreen> createState() => _RegistrationScreenState();
+}
+
+class _RegistrationScreenState extends State<RegistrationScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.blue[700]!, Colors.blue[900]!],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 40),
+                  const Text(
+                    'Create Account',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Join CardWise today',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[300],
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  Card(
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _nameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Full Name',
+                              prefixIcon: Icon(Icons.person),
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter your name';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _emailController,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.email),
+                              border: OutlineInput
